@@ -1,5 +1,7 @@
 library(tidyverse)
 library(data.table)
+library(caret)
+library(broom)
 
 churn_data = fread("churn_data.csv") %>% as_tibble()
 
@@ -197,5 +199,66 @@ churn_data = churn_data %>%
 churn_data %>% 
   ggplot(aes(x = Total_Month_Diff_Charge, fill = Churn)) +
   geom_histogram()
+
+
+#Check imbalance in data
+
+xtabs(~ Churn + gender, data = churn_data)
+xtabs(~ Churn + SeniorCitizen, data = churn_data)
+xtabs(~ Churn + Partner, data = churn_data)
+
+
+#Data Prep
+churn_data = churn_data %>% 
+  mutate(
+    Churn = as.factor(Churn)
+  )
+
+#Remove Id column
+churn_data_model = churn_data %>% 
+  select(-customerID) %>% 
+  mutate(
+    Churn = ifelse(Churn == "Yes",1,0)
+  )
+
+#Split Data into Test and Train using the Straight Forward Approach
+
+
+set.seed(123)
+training.samples <- churn_data_model$Churn %>% 
+  createDataPartition(p = 0.7, list = FALSE)
+train.data  <- churn_data_model[training.samples, ]
+
+train.data = train.data %>% 
+  mutate_if(is.character,as.factor)
+
+test.data <- churn_data_model[-training.samples, ]
+
+
+test.data = test.data %>% 
+  mutate_if(is.character,as.factor)
+
+
+#Simple Logistic Regression
+logistic_model = glm(Churn ~ ., data = train.data, family = "binomial")
+
+logit_summary = summary(logistic_model)
+
+logit_summary_tb = tidy(logistic_model)
+
+#Filter all signficant estimates
+logit_summary_tb %>% 
+  filter(p.value < 0.05)
+
+
+#Evaluate Model
+probabilities <- logistic_model %>% predict(test.data, type = "response")
+predicted.classes <- ifelse(probabilities > 0.5, 1, 0)
+
+
+confusionMatrix(test.data$Churn %>% as.factor(),predicted.classes %>% as.factor())
+#Without doing any feature engineering, we got an accuracy of 81.29%
+
+
 
 
