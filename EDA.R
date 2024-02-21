@@ -2,6 +2,11 @@ library(tidyverse)
 library(data.table)
 library(caret)
 library(broom)
+library(Boruta)
+library(mlbench)
+library(rpart)
+library(rpart.plot)
+
 
 churn_data = fread("churn_data.csv") %>% as_tibble()
 
@@ -219,7 +224,8 @@ churn_data_model = churn_data %>%
   select(-customerID) %>% 
   mutate(
     Churn = ifelse(Churn == "Yes",1,0)
-  )
+  ) %>% 
+  filter(!is.na(TotalCharges))
 
 #Split Data into Test and Train using the Straight Forward Approach
 
@@ -259,6 +265,71 @@ predicted.classes <- ifelse(probabilities > 0.5, 1, 0)
 confusionMatrix(test.data$Churn %>% as.factor(),predicted.classes %>% as.factor())
 #Without doing any feature engineering, we got an accuracy of 81.29%
 
+#Lets try applying Feature selection
 
+set.seed(111)
+
+
+boruta = Boruta(Churn ~ ., data = churn_data_model, doTrace = 2)
+plot(boruta, las = 2, cex.axis = 0.5)
+
+
+#Tentative Attributes Fix
+bor = TentativeRoughFix(boruta)
+
+#Let's use the confirmed attributes as part of our model
+
+getNonRejectedFormula(bor)
+
+featured_logit = glm(getNonRejectedFormula(bor), data = train.data,family = "binomial" )
+
+
+#Evaluate Model
+probabilities_ft <- featured_logit %>% predict(test.data, type = "response")
+predicted.classes_ft <- ifelse(probabilities_ft > 0.5, 1, 0)
+
+
+confusionMatrix(test.data$Churn %>% as.factor(),predicted.classes_ft %>% as.factor())
+
+#Not much of a help but at least we now know how to automate feature selection
+
+#Lets try to use decision tree
+#For the first version, we can check what will be the performance of the model without doing any
+#feature selection
+tree_model_all <- rpart(Churn ~ ., data = train.data,method = "class")
+
+rpart.plot(tree_model_all)
+#As per rpart.plot, looks like our model only needs 5 features to predict
+
+#Check on train data
+p_train <- predict(tree_model_all, train.data, type = 'class')
+confusionMatrix(p_train %>% as.factor(), train.data$Churn %>% as.factor())
+
+#Check on Test Data
+p_test <- predict(tree_model_all, test.data, type = 'class')
+confusionMatrix(p_test %>% as.factor(), test.data$Churn %>% as.factor())
+#Our Decision tree model was able to achieve 80% over all accuracy just by using 5 features
+#That is not bad compared to our logistic regression model that's using 18 features to have an accuracy of 81%
+
+#Lets try to use the boruta selected features on decision tree and see if it will help
+tree_boruta = rpart(getConfirmedFormula(bor), data = train.data, method = "class")
+
+p_test_boruta <- predict(tree_boruta, test.data, type = 'class')
+confusionMatrix(p_test_boruta %>% as.factor(), test.data$Churn %>% as.factor())
+
+#Literally no change in the accuracy. What if we try to use the selected feautre by our decision tree on our
+#logistic model?
+
+logit_tree_model = glm(Churn ~ Contract + InternetService + tenure + TechSupport, data = train.data, family = "binomial")
+
+
+probabilities_logit_tree <- logit_tree_model %>% predict(test.data, type = "response")
+predicted.classes_logit_tree <- ifelse(probabilities_logit_tree > 0.5, 1, 0)
+
+
+confusionMatrix(test.data$Churn %>% as.factor(),predicted.classes_logit_tree %>% as.factor())
+
+#Good enough accuracy. So as a conclusion, we can try to use decision tree as well to identify
+#Highly impacting attributes for our model, for much larger data sets, we can use boruta algorithm
 
 
