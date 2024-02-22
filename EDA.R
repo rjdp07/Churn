@@ -6,6 +6,8 @@ library(Boruta)
 library(mlbench)
 library(rpart)
 library(rpart.plot)
+library(Matrix)
+library(xgboost)
 
 
 churn_data = fread("churn_data.csv") %>% as_tibble()
@@ -331,5 +333,113 @@ confusionMatrix(test.data$Churn %>% as.factor(),predicted.classes_logit_tree %>%
 
 #Good enough accuracy. So as a conclusion, we can try to use decision tree as well to identify
 #Highly impacting attributes for our model, for much larger data sets, we can use boruta algorithm
+
+
+
+#Lets try to use XGBoosting
+
+
+#Create matrix - One-Hot Encoding for factor variables
+
+
+trainm = sparse.model.matrix(Churn ~ ., data = train.data)
+train_label = train.data[,"Churn"]
+train_matrix = xgb.DMatrix(data = as.matrix(trainm), label = train_label$Churn)
+
+
+#Repeat the process for test data
+testm = sparse.model.matrix(Churn ~., data = test.data)
+test_label = test.data[,"Churn"]
+test_matrix = xgb.DMatrix(data = as.matrix(testm),label = test_label$Churn)
+
+
+#Parameters
+nc = length(unique(train_label$Churn))
+xgb_params = list("objective" = "multi:softprob",
+                  "eval_metric" = "mlogloss",
+                  "num_class" = nc
+                  )
+
+watchlist = list(train = train_matrix, test = test_matrix)
+
+
+# eXtreme Gradient Boosting Model
+bst_model = xgb.train(params = xgb_params,
+                      data = train_matrix,
+                      nrounds = 100,
+                      watchlist = watchlist
+                      )
+
+bst_model
+
+#Plot evaluation Log
+e = data.frame(bst_model$evaluation_log)
+
+plot(e$iter, e$train_mlogloss, col = 'blue')
+lines(e$iter,e$test_mlogloss, col = 'red')
+
+#Minimum Test Error rate iteration
+min(e$test_mlogloss)
+e[e$test_mlogloss == 0.4108483,]
+
+
+#lets optimize it
+#Add eta parameter to adjust learning rate
+#low value of eta means model are more robust to overfitting
+bst_model = xgb.train(params = xgb_params,
+                      data = train_matrix,
+                      nrounds = 100,
+                      watchlist = watchlist,
+                      eta = 0.01,
+                      max.depth = 3,
+                      gamma = 0,
+                      subsample = 1,
+                      colsample_bytree = 1,
+                      missing = NA,
+                      seed = 123
+)
+
+#Plot evaluation Log
+e = data.frame(bst_model$evaluation_log)
+
+plot(e$iter, e$train_mlogloss, col = 'blue')
+lines(e$iter,e$test_mlogloss, col = 'red')
+
+#Minimum Test Error rate iteration
+min(e$test_mlogloss)
+
+
+
+
+#Get Feature Importance
+imp = xgb.importance(colnames(train_matrix), model = bst_model)
+
+#Tenure has the highest information gain
+#Plot the importance
+xgb.plot.importance(imp)
+
+#Prediction and Confusion Matrix - test data
+
+p = predict(bst_model, newdata = test_matrix)
+
+#convert it to proper probability structure
+pred = matrix(p, nrow = nc, ncol = length(p)/nc) %>% 
+  t() %>% 
+  as.tibble() %>% 
+  mutate(
+    label = test_label$Churn,
+    max_prob = max.col(., "last") - 1
+  ) %>% 
+  rename(
+    "Did_Not_Churn" = "V1",
+    "Churn" = "V2"
+  )
+
+table(Prediction = pred$max_prob, Actual = pred$label)
+#80% Accuracy. Logistic seems to perform better by 1%
+
+
+
+
 
 
