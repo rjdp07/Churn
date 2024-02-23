@@ -1,0 +1,55 @@
+---
+title: "EDA For Churn"
+format: html
+editor: visual
+---
+
+## EDA
+
+```{r warning=FALSE, message=FALSE}
+#declare needed Library
+library(tidyverse)
+library(data.table)
+library(caret)
+library(broom)
+library(Boruta)
+library(mlbench)
+library(rpart)
+library(rpart.plot)
+library(Matrix)
+library(xgboost)
+
+
+#Import data first
+
+churn_data = fread("churn_data.csv") %>% as_tibble()
+
+head(churn_data)
+```
+
+### Check Data Cardinality
+
+```{r warning=FALSE, message=FALSE}
+#Check customer ID Cardinality
+
+nrow(churn_data) == length(churn_data$customerID %>% unique())
+
+#Check gender values
+churn_data %>% 
+  count(gender, sort = TRUE)
+
+#Check Senior Citizen Values
+churn_data %>% 
+  count(SeniorCitizen)
+#Majority of our subscribers are still not senior Citizen
+
+#Check Partner column values
+churn_data %>% 
+  count(Partner, sort = TRUE)
+#We have more single subscribers
+
+#Check Dependents column values
+churn_data %>% 
+  count(Dependents, sort = TRUE)
+#We have more subscribers that does not have any dependent
+```
